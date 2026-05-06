@@ -33,6 +33,8 @@
         "observable-hooks": "^4.2.3",
         "prettier": "^3.4.2",
         "prettier-plugin-tailwindcss": "^0.6.11",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
         "rxjs": "^7.8.1",
         "spcr-whats-new": "^1.0.1",
         "spicetify-creator": "^1.0.17",
