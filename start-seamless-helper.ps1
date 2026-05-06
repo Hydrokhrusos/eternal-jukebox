@@ -58,8 +58,7 @@ function Find-ExecutableUnder {
 function Resolve-HelperExecutable {
     param(
         [Parameter(Mandatory = $true)][string]$FileName,
-        [Parameter(Mandatory = $true)][string]$EnvName,
-        [switch]$Optional
+        [Parameter(Mandatory = $true)][string]$EnvName
     )
 
     $configured = Get-ConfiguredPath -Name $EnvName
@@ -85,10 +84,6 @@ function Resolve-HelperExecutable {
         if ($found) {
             return $found
         }
-    }
-
-    if ($Optional) {
-        return $null
     }
 
     throw "$FileName was not found. Re-run the installer so it can install the helper dependencies."
@@ -123,12 +118,8 @@ if (-not (Test-Path -LiteralPath $Script -PathType Leaf)) {
 
 $Deno = Resolve-HelperExecutable -FileName "deno.exe" -EnvName "EJB_DENO"
 $YtDlp = Resolve-HelperExecutable -FileName "yt-dlp.exe" -EnvName "EJB_YTDLP"
-$Ffmpeg = Resolve-HelperExecutable -FileName "ffmpeg.exe" -EnvName "EJB_FFMPEG" -Optional
 
 $env:EJB_YTDLP = $YtDlp
-if ($Ffmpeg) {
-    $env:EJB_FFMPEG = $Ffmpeg
-}
 $env:EJB_AUDIO_CACHE = $Cache
 
 New-Item -ItemType Directory -Force -Path $Cache | Out-Null
@@ -138,9 +129,6 @@ $readRoots = @(
     $Cache,
     (Split-Path -Parent $YtDlp)
 )
-if ($Ffmpeg) {
-    $readRoots += Split-Path -Parent $Ffmpeg
-}
 if (Test-Path -LiteralPath $Packages -PathType Container) {
     $readRoots += $Packages
 }
@@ -153,7 +141,7 @@ $arguments = @(
     "--allow-read=$allowRead",
     "--allow-write=$Cache",
     "--allow-run=$YtDlp",
-    "--allow-env=LOCALAPPDATA,PATH,EJB_HELPER_PORT,EJB_AUDIO_CACHE,EJB_YTDLP,EJB_FFMPEG",
+    "--allow-env=LOCALAPPDATA,PATH,EJB_HELPER_PORT,EJB_AUDIO_CACHE,EJB_YTDLP",
     $Script
 )
 
