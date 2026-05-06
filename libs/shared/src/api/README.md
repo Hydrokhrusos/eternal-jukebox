@@ -1,1 +1,0 @@
-Types and endpoints taken from the [Spotify typescript SDK](https://github.com/spotify/spotify-web-api-ts-sdk).

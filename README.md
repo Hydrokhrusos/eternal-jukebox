@@ -95,8 +95,6 @@ On Windows, the installer installs Deno and `yt-dlp` if they are missing, create
 .\start-seamless-helper.ps1
 ```
 
-FFmpeg is optional. The current original-YouTube-audio path does not transcode or remux audio, but the helper will detect FFmpeg if you already have it installed.
-
 The runtime patch keeps Spotify volume, seeking, play/pause, and the jukebox visualization in sync with the Web Audio driver. If the helper is not running or cannot provide decodable audio, the jukebox disables instead of falling back to Spotify seeking.
 
 ## Known issues
