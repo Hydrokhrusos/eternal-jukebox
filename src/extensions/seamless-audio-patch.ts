@@ -381,7 +381,7 @@
     }
 
     class SeamlessWebAudioDriver {
-        constructor(jukebox, originalDriver, buffer) {
+        constructor(jukebox, buffer) {
             this.jukebox = jukebox;
             this.songState = jukebox.songState;
             this.settings = jukebox.settings;
@@ -406,7 +406,6 @@
             this.isProcessing = false;
             this.onProgressSubject = createSubject();
             this.onProgress$ = this.onProgressSubject.asObservable();
-            this.originalShouldRandomBranch = originalDriver?.shouldRandomBranch;
             this.onBounceKeyDown = (event) => {
                 if (event.key === "Shift") {
                     this.bouncing = true;
@@ -757,10 +756,6 @@
         }
 
         shouldRandomBranch(beat) {
-            if (typeof this.originalShouldRandomBranch === "function") {
-                return this.originalShouldRandomBranch.call(this, beat);
-            }
-
             const elapsed = Date.now() - this.songState.startTime;
 
             if (this.settings.maxJukeboxPlayTime > 0 && elapsed > this.settings.maxJukeboxPlayTime) {
@@ -918,10 +913,13 @@
             return true;
         }
 
-        const originalDriver = jukebox.driver;
-        originalDriver?.stop?.();
+        const previousDriver = jukebox.driver;
 
-        const driver = new SeamlessWebAudioDriver(jukebox, originalDriver, loaded.buffer);
+        if (previousDriver && previousDriver !== state.activeDriver) {
+            previousDriver.stop?.();
+        }
+
+        const driver = new SeamlessWebAudioDriver(jukebox, loaded.buffer);
         jukebox.driver = driver;
         state.activeDriver = driver;
         await driver.start();
@@ -1110,7 +1108,13 @@
         };
 
         jukebox.stop = function stopWithSeamlessAudio(...args) {
-            state.activeDriver?.stop?.();
+            const activeDriver = state.activeDriver;
+
+            if (this.driver === activeDriver) {
+                this.driver = null;
+            }
+
+            activeDriver?.stop?.();
             return originalStop(...args);
         };
 

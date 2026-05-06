@@ -7,13 +7,16 @@ import { JukeboxSongState } from './jukebox-song-state';
 
 import { getTrackAudioAnalysis } from '@shared/api/endpoints/tracks/get-audio-analysis';
 import type { AudioAnalysis } from '@shared/api/models/audio-analysis';
-import { Driver } from '../driver';
 import { SettingsService } from '../services/settings-service';
 
 export type StatsChangedEvent = {
     beatsPlayed: number;
     currentRandomBranchChance: number;
     listenTime: number;
+};
+
+type JukeboxDriver = {
+    stop(): void;
 };
 
 /**
@@ -48,7 +51,7 @@ export class Jukebox {
     /**
      * Jukebox driver.
      */
-    private driver: Driver | null = null;
+    private driver: JukeboxDriver | null = null;
 
     public get isEnabled(): boolean {
         return this.stateChangedSubject.value;
@@ -63,7 +66,6 @@ export class Jukebox {
     }
 
     private songChangedSubscription: Subscription = new Subscription();
-    private driverProcessSubscription: Subscription = new Subscription();
 
     private readonly statsChangedSubject: Subject<StatsChangedEvent> =
         new Subject<StatsChangedEvent>();
@@ -125,8 +127,6 @@ export class Jukebox {
     private stop(): void {
         this.driver?.stop();
         this.driver = null;
-        this.driverProcessSubscription.unsubscribe();
-        this.driverProcessSubscription = new Subscription();
         this.songState = null;
     }
 
@@ -134,7 +134,7 @@ export class Jukebox {
      * Initialize and start the jukebox for the current track.
      */
     private async start(): Promise<void> {
-        const currentTrack = Spicetify.Player.data.item;
+        const currentTrack = Spicetify.Player.data?.item;
 
         if (currentTrack === undefined) {
             return;
@@ -183,22 +183,6 @@ export class Jukebox {
             remixedAnalysis,
             graph,
         );
-
-        this.driver = new Driver(this.songState, this.settings);
-        this.driverProcessSubscription.add(
-            this.driver.onProgress$.subscribe(() => {
-                this.statsChangedSubject.next({
-                    beatsPlayed: this.songState?.beatsPlayed ?? 0,
-                    currentRandomBranchChance:
-                        this.songState?.currentRandomBranchChance ?? 0,
-                    listenTime:
-                        this.songState !== null
-                            ? new Date().getTime() - this.songState.startTime
-                            : 0,
-                });
-            }),
-        );
-        this.driver.start();
     }
 
     private disableWithError(error: string): void {
