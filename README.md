@@ -99,8 +99,6 @@ The runtime patch keeps Spotify volume, seeking, play/pause, and the jukebox vis
 
 ## Known issues
 
--   Songs getting stuck in short loops due to issues with the graph generation
-
 ## Upcoming features
 
 -   More graph interactivity
