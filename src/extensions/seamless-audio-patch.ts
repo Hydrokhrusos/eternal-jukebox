@@ -17,7 +17,7 @@
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const state = window.__ejbSeamlessAudio ?? {
         buffers: new Map(),
-        loadingKeys: new Set(),
+        loadingKeys: new Map(),
         activeDriver: null,
         audioContext: null,
         originalSeekTo: null,
@@ -38,7 +38,9 @@
 
     window.__ejbSeamlessAudio = state;
     state.buffers ??= new Map();
-    state.loadingKeys ??= new Set();
+    if (!(state.loadingKeys instanceof Map)) {
+        state.loadingKeys = new Map();
+    }
 
     function notify(message, isError = false) {
         try {
@@ -102,10 +104,19 @@
     }
 
     function getTrackLabel(songState = window.jukebox?.songState) {
-        const track = songState?.track ?? Spicetify?.Player?.data?.item;
-        const title = track?.metadata?.title ?? track?.name ?? "track";
-        const artist = track?.metadata?.artist_name ?? track?.artists?.[0]?.name;
+        const title = getTrackTitle(songState);
+        const artist = getTrackArtist(songState);
         return artist ? `${title} - ${artist}` : title;
+    }
+
+    function getTrackTitle(songState = window.jukebox?.songState) {
+        const track = songState?.track ?? Spicetify?.Player?.data?.item;
+        return track?.metadata?.title ?? track?.name ?? "track";
+    }
+
+    function getTrackArtist(songState = window.jukebox?.songState) {
+        const track = songState?.track ?? Spicetify?.Player?.data?.item;
+        return track?.metadata?.artist_name ?? track?.artists?.[0]?.name ?? "";
     }
 
     function getSpotifyProgress() {
@@ -856,46 +867,83 @@
         notify(`Loaded Web Audio for ${getTrackLabel()}.`);
     }
 
+    async function readHelperResponse(response) {
+        const text = await response.text();
+
+        if (!text) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(text);
+        } catch {
+            return { error: text.trim() };
+        }
+    }
+
+    function helperErrorMessage(data, response, query) {
+        const detail = data?.error || data?.message || response.statusText || `HTTP ${response.status}`;
+
+        if (/^(could not|no youtube|yt-dlp|seamless helper)/i.test(detail)) {
+            return detail;
+        }
+
+        return `Could not load YouTube audio for "${query}": ${detail}.`;
+    }
+
     async function loadAudioFromHelper(songState) {
         const key = getTrackKey(songState);
 
-        if (!key || state.buffers.has(key) || state.loadingKeys.has(key)) {
+        if (!key || state.buffers.has(key)) {
             return state.buffers.has(key);
         }
 
-        state.loadingKeys.add(key);
+        const existingLoad = state.loadingKeys.get(key);
 
-        try {
-            if (!await isHelperRunning()) {
-                throw new Error("Seamless helper is not running.");
-            }
-
-            const query = getTrackLabel(songState);
-            const resolveUrl = new URL(`${HELPER_BASE}/resolve`);
-            resolveUrl.searchParams.set("query", query);
-            resolveUrl.searchParams.set("trackKey", key);
-
-            notify(`Resolving audio for ${query}...`);
-            const response = await fetch(resolveUrl);
-
-            if (!response.ok) {
-                throw new Error(`Helper returned ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            if (!data?.ok || !data.url) {
-                throw new Error(data?.error || "Helper did not return an audio URL.");
-            }
-
-            await loadAudioUrl(data.url, key);
-            return true;
-        } catch (error) {
-            console.error(error);
-            return false;
-        } finally {
-            state.loadingKeys.delete(key);
+        if (existingLoad) {
+            return existingLoad;
         }
+
+        const loadPromise = (async () => {
+            try {
+                if (!await isHelperRunning()) {
+                    throw new Error("Seamless helper is not running.");
+                }
+
+                const query = getTrackLabel(songState);
+                const resolveUrl = new URL(`${HELPER_BASE}/resolve`);
+                resolveUrl.searchParams.set("query", query);
+                resolveUrl.searchParams.set("trackKey", key);
+                resolveUrl.searchParams.set("title", getTrackTitle(songState));
+                resolveUrl.searchParams.set("artist", getTrackArtist(songState));
+
+                const durationMs = getDurationMs({ songState });
+
+                if (durationMs > 0) {
+                    resolveUrl.searchParams.set("durationMs", String(Math.round(durationMs)));
+                }
+
+                notify(`Resolving audio for ${query}...`);
+                const response = await fetch(resolveUrl);
+                const data = await readHelperResponse(response);
+
+                if (!data?.ok || !data.url) {
+                    throw new Error(helperErrorMessage(data, response, query));
+                }
+
+                await loadAudioUrl(data.url, key);
+                return true;
+            } catch (error) {
+                console.error(error);
+                notify(error?.message ?? "Seamless audio resolve failed.", true);
+                return false;
+            } finally {
+                state.loadingKeys.delete(key);
+            }
+        })();
+
+        state.loadingKeys.set(key, loadPromise);
+        return loadPromise;
     }
 
     function getLoadedAudio(songState) {
@@ -903,9 +951,9 @@
         return key ? state.buffers.get(key) : null;
     }
 
-    function disableJukeboxWithSeamlessError(jukebox, message) {
+    function stopJukeboxWithSeamlessError(jukebox, message) {
         notify(message, true);
-        jukebox?.disable?.();
+        jukebox?.stop?.();
     }
 
     async function switchToSeamless(jukebox, announceFailure = false) {
@@ -921,11 +969,11 @@
         }
 
         if (!loaded?.buffer) {
-            disableJukeboxWithSeamlessError(
+            stopJukeboxWithSeamlessError(
                 jukebox,
                 announceFailure
-                    ? "No decoded audio loaded for this track; jukebox disabled."
-                    : "Seamless audio unavailable; jukebox disabled."
+                    ? "No decoded audio loaded for this track; jukebox stopped."
+                    : "Seamless audio unavailable; jukebox stopped."
             );
             return false;
         }
@@ -1119,7 +1167,7 @@
 
         jukebox.start = async function startWithSeamlessAudio(...args) {
             if (!await isHelperRunning()) {
-                disableJukeboxWithSeamlessError(this, "Seamless helper is not running; jukebox disabled.");
+                notify("Seamless helper is not running; jukebox was not started.", true);
                 return;
             }
 
