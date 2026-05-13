@@ -16,6 +16,7 @@ export type StatsChangedEvent = {
 };
 
 type JukeboxDriver = {
+    reloadSettings?(settings: Readonly<JukeboxSettings>): void;
     stop(): void;
 };
 
@@ -87,7 +88,17 @@ export class Jukebox {
         this.settings = SettingsService.settings;
 
         if (this.isEnabled) {
-            this.stop();
+            if (this.songState !== null) {
+                this.songState.graph = this.generateGraph(
+                    this.songState.analysis,
+                );
+                this.songState.currentRandomBranchChance =
+                    this.settings.minRandomBranchChance;
+                this.driver?.reloadSettings?.(this.settings);
+                this.songState = this.songState;
+                return;
+            }
+
             await this.start();
         }
     }
@@ -170,19 +181,17 @@ export class Jukebox {
         // Preprocess the track
         const remixedAnalysis = new Remixer(analysis).remixTrack();
 
-        // Generate branches
-        const branchGenerator = new GraphGenerator(
-            this.settings,
-            remixedAnalysis.beats,
-        );
-
-        const graph = branchGenerator.generateGraph();
-
         this.songState = new JukeboxSongState(
             currentTrack,
             remixedAnalysis,
-            graph,
+            this.generateGraph(remixedAnalysis),
         );
+    }
+
+    private generateGraph(
+        analysis: JukeboxSongState['analysis'],
+    ): ReturnType<GraphGenerator['generateGraph']> {
+        return new GraphGenerator(this.settings, analysis.beats).generateGraph();
     }
 
     private disableWithError(error: string): void {

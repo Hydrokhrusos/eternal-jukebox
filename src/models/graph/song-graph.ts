@@ -11,6 +11,7 @@ export class SongGraph {
 
     /**
      * Index of the last beat with a good branch.
+     * If no good terminal branch exists, this is one past the final beat.
      */
     public lastBranchPoint: number = 0;
 

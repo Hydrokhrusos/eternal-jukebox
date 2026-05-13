@@ -201,6 +201,56 @@ export function SettingsModal(): JSX.Element {
                 }}
             />
 
+            <SliderContainer
+                label={`End Branch Source Window: after ${Math.round(
+                    settings.terminalBranchSourceStart * 100,
+                )}%`}
+                subLabel="Only force the final loop from this late in the song or later."
+                slider={
+                    <input
+                        id="jukebox.settings.terminalBranchSourceStart"
+                        type={'range'}
+                        min={60}
+                        max={95}
+                        value={settings.terminalBranchSourceStart * 100}
+                        step={5}
+                        onChange={(e) => {
+                            updateSettingsField(
+                                'terminalBranchSourceStart',
+                                e.target.valueAsNumber / 100,
+                            );
+                        }}
+                    />
+                }
+                minLabel="Earlier"
+                maxLabel="Later"
+            />
+
+            <SliderContainer
+                label={`End Branch Target Window: before ${Math.round(
+                    settings.terminalBranchTargetEnd * 100,
+                )}%`}
+                subLabel="Only force the final loop back to this early in the song or earlier."
+                slider={
+                    <input
+                        id="jukebox.settings.terminalBranchTargetEnd"
+                        type={'range'}
+                        min={5}
+                        max={50}
+                        value={settings.terminalBranchTargetEnd * 100}
+                        step={5}
+                        onChange={(e) => {
+                            updateSettingsField(
+                                'terminalBranchTargetEnd',
+                                e.target.valueAsNumber / 100,
+                            );
+                        }}
+                    />
+                }
+                minLabel="Earlier"
+                maxLabel="Later"
+            />
+
             <div>
                 <TextComponent elementType="h3" variant="violaBold">
                     Maximum play time for a song, in seconds

@@ -19,8 +19,9 @@ export class SettingsService {
             return new JukeboxSettings().toPartial();
         }
 
-        const parsedValue: JukeboxStoredSettings = JSON.parse(storageValue);
-        return parsedValue;
+        const parsedValue: Partial<JukeboxStoredSettings> =
+            JSON.parse(storageValue);
+        return JukeboxSettings.fromPartial(parsedValue).toPartial();
     }
 
     public static set storedSettings(settings: JukeboxStoredSettings) {

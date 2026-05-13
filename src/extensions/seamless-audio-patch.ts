@@ -486,6 +486,27 @@
             await this.pause();
         }
 
+        reloadSettings(settings) {
+            const progress = this.getProgress();
+
+            this.settings = settings;
+            stopNode(this.pending?.source);
+            this.pending = null;
+            clearBeatPlaying(this.songState);
+            setEdgePlaying(this.lastBranch, false);
+            this.lastBranch = null;
+            this.songState = this.jukebox.songState;
+            this.currentBeat = findBeatAt(this.songState, progress);
+            this.beatsSinceLastBranch = 0;
+
+            if (this.currentBeat) {
+                this.currentBeat.isPlaying = true;
+            }
+
+            this.emitProgress();
+            this.syncPlayerUi();
+        }
+
         async syncVolume() {
             const volume = await getSpotifyVolume();
 

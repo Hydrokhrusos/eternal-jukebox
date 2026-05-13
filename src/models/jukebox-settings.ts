@@ -60,6 +60,25 @@ export class JukeboxSettings {
         JukeboxSettings.defaultRandomBranchChanceDelta;
 
     // ========
+    // Forced terminal branch
+    // ========
+
+    public static readonly defaultTerminalBranchSourceStart: number = 0.85;
+    public static readonly defaultTerminalBranchTargetEnd: number = 0.25;
+
+    /**
+     * Earliest source position for the forced terminal branch.
+     */
+    public terminalBranchSourceStart: number =
+        JukeboxSettings.defaultTerminalBranchSourceStart;
+
+    /**
+     * Latest destination position for the forced terminal branch.
+     */
+    public terminalBranchTargetEnd: number =
+        JukeboxSettings.defaultTerminalBranchTargetEnd;
+
+    // ========
     // Values
     // ========
 
@@ -98,24 +117,43 @@ export class JukeboxSettings {
     public alwaysFollowLastBranch: boolean = true;
 
     public static fromPartial(
-        storedSettings: JukeboxStoredSettings,
+        storedSettings: Partial<JukeboxStoredSettings>,
     ): JukeboxSettings {
         const settings = new JukeboxSettings();
 
-        settings.maxBranchDistance = storedSettings.maxBranchDistance;
+        settings.maxBranchDistance =
+            storedSettings.maxBranchDistance ?? settings.maxBranchDistance;
         settings.useDynamicBranchDistance =
-            storedSettings.useDynamicBranchDistance;
-        settings.minRandomBranchChance = storedSettings.minRandomBranchChance;
-        settings.maxRandomBranchChance = storedSettings.maxRandomBranchChance;
+            storedSettings.useDynamicBranchDistance ??
+            settings.useDynamicBranchDistance;
+        settings.minRandomBranchChance =
+            storedSettings.minRandomBranchChance ??
+            settings.minRandomBranchChance;
+        settings.maxRandomBranchChance =
+            storedSettings.maxRandomBranchChance ??
+            settings.maxRandomBranchChance;
         settings.randomBranchChanceDelta =
-            storedSettings.randomBranchChanceDelta;
-        settings.addLastEdge = storedSettings.addLastEdge;
-        settings.justBackwards = storedSettings.justBackwards;
-        settings.justLongBranches = storedSettings.justLongBranches;
+            storedSettings.randomBranchChanceDelta ??
+            settings.randomBranchChanceDelta;
+        settings.terminalBranchSourceStart =
+            storedSettings.terminalBranchSourceStart ??
+            settings.terminalBranchSourceStart;
+        settings.terminalBranchTargetEnd =
+            storedSettings.terminalBranchTargetEnd ??
+            settings.terminalBranchTargetEnd;
+        settings.addLastEdge = storedSettings.addLastEdge ?? settings.addLastEdge;
+        settings.justBackwards =
+            storedSettings.justBackwards ?? settings.justBackwards;
+        settings.justLongBranches =
+            storedSettings.justLongBranches ?? settings.justLongBranches;
         settings.removeSequentialBranches =
-            storedSettings.removeSequentialBranches;
-        settings.alwaysFollowLastBranch = storedSettings.alwaysFollowLastBranch;
-        settings.maxJukeboxPlayTime = storedSettings.maxJukeboxPlayTime;
+            storedSettings.removeSequentialBranches ??
+            settings.removeSequentialBranches;
+        settings.alwaysFollowLastBranch =
+            storedSettings.alwaysFollowLastBranch ??
+            settings.alwaysFollowLastBranch;
+        settings.maxJukeboxPlayTime =
+            storedSettings.maxJukeboxPlayTime ?? settings.maxJukeboxPlayTime;
 
         return settings;
     }
@@ -127,6 +165,8 @@ export class JukeboxSettings {
             minRandomBranchChance: this.minRandomBranchChance,
             maxRandomBranchChance: this.maxRandomBranchChance,
             randomBranchChanceDelta: this.randomBranchChanceDelta,
+            terminalBranchSourceStart: this.terminalBranchSourceStart,
+            terminalBranchTargetEnd: this.terminalBranchTargetEnd,
             addLastEdge: this.addLastEdge,
             justBackwards: this.justBackwards,
             justLongBranches: this.justLongBranches,
@@ -144,6 +184,8 @@ export type JukeboxStoredSettings = Pick<
     | 'minRandomBranchChance'
     | 'maxRandomBranchChance'
     | 'randomBranchChanceDelta'
+    | 'terminalBranchSourceStart'
+    | 'terminalBranchTargetEnd'
     | 'addLastEdge'
     | 'justBackwards'
     | 'justLongBranches'

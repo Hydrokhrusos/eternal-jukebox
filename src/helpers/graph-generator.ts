@@ -17,6 +17,8 @@ export class GraphGenerator {
      */
     private readonly allEdges: Edge[] = [];
 
+    private forcedTerminalBranch: Edge | null = null;
+
     /**
      * Contains all neighbours for each beat.
      */
@@ -62,6 +64,7 @@ export class GraphGenerator {
         }
 
         this.graph = new SongGraph(graphBeats);
+        this.forcedTerminalBranch = null;
 
         // precalculateNearestNeighbors --> collectNearestNeighbors --> postProcessNearestNeighbors
 
@@ -127,9 +130,6 @@ export class GraphGenerator {
     private calculateNearestNeighborsForBeat(
         currentBeat: RemixedTimeInterval,
     ): void {
-        const maxNeighbors = this.maxBranches;
-        const maxBranchDistance = JukeboxSettings.rangeMaxBranchDistance;
-
         const edges: Edge[] = [];
 
         for (const [otherBeatIndex, otherBeat] of this.beats.entries()) {
@@ -174,14 +174,12 @@ export class GraphGenerator {
                 segmentDistanceSum / currentBeat.overlappingSegments.length +
                 parentDistance;
 
-            if (totalDistance < maxBranchDistance) {
-                const edge: Edge = new Edge(
-                    this.graph.beats[currentBeat.index],
-                    this.graph.beats[otherBeatIndex],
-                    totalDistance,
-                );
-                edges.push(edge);
-            }
+            const edge: Edge = new Edge(
+                this.graph.beats[currentBeat.index],
+                this.graph.beats[otherBeatIndex],
+                totalDistance,
+            );
+            edges.push(edge);
         }
 
         edges.sort((a, b) => {
@@ -194,9 +192,7 @@ export class GraphGenerator {
             }
         });
 
-        for (let i = 0; i < maxNeighbors && i < edges.length; i++) {
-            const edge = edges[i];
-
+        for (const edge of edges) {
             this.allNeighbours[currentBeat.index].push(edge);
             this.allEdges.push(edge);
         }
@@ -321,7 +317,7 @@ export class GraphGenerator {
             }
 
             return false;
-        });
+        }).slice(0, this.maxBranches);
     }
 
     // ==============================
@@ -335,12 +331,12 @@ export class GraphGenerator {
         if (this.settings.addLastEdge) {
             this.insertBestBackwardBranch(
                 this.computedMaxBranchDistance,
-                this.longestBackwardBranch() < 50 ? 65 : 55,
             );
         }
 
         // Get the last branch point before the end of the song.
         this.graph.lastBranchPoint = this.findBestLastBeat();
+        this.keepOnlyTerminalBranches();
 
         // Filter out branches that end after the last branch point.
         this.filterOutBadBranches();
@@ -351,39 +347,202 @@ export class GraphGenerator {
     }
 
     /**
-     * Find the longest backward branch.
-     *
-     * we want to find the best, long backwards branch
-     * and ensure that it is included in the graph to
-     * avoid short branching songs like:
-     * http://labs.echonest.com/Uploader/index.html?trid=TRVHPII13AFF43D495
-     * @returns The percent of the song covered by the longest branch.
+     * Insert the best backward branch, picked from the unfiltered allNeighbours list.
+     * @param threshold Current allowed max branch distance, if dynamically chosen.
      */
-    private longestBackwardBranch(): number {
-        let longest = 0;
+    private insertBestBackwardBranch(threshold: number): void {
+        const branches = this.getTerminalBranchCandidates();
 
-        for (const beat of this.graph.beats) {
-            for (const neighbor of beat.neighbours) {
-                const delta = beat.index - neighbor.destination.index;
-                if (delta > longest) {
-                    longest = delta;
-                }
-            }
+        if (branches.length === 0) {
+            return;
         }
 
-        const longestBackwardBranch = (longest * 100) / this.beats.length;
-        return longestBackwardBranch;
+        branches.sort((a, b) => this.compareTerminalBranchCandidates(a, b));
+
+        const bestBranch = branches[0];
+
+        const bestBeat: Beat = bestBranch.currentBeat;
+        const bestNeighbor: Edge = bestBranch.edge;
+        const bestDistance = bestNeighbor.distance;
+
+        if (
+            bestDistance > threshold ||
+            !bestBeat.neighbours.some(
+                (neighbor) => neighbor.id === bestNeighbor.id,
+            )
+        ) {
+            bestBeat.neighbours.push(bestNeighbor);
+        }
+
+        this.forcedTerminalBranch = bestNeighbor;
     }
 
     /**
-     * Insert the best backward branch, picked from the unfiltered allNeighbours list.
-     * @param threshold Current allowed max branch distance, if dynamically chosen.
-     * @param maxBranchDistance Max allowed branch distance.
+     * Find the best last beat for the song.
+     * @returns The index of the best last beat.
      */
-    private insertBestBackwardBranch(
-        threshold: number,
-        maxBranchDistance: number,
-    ): void {
+    private findBestLastBeat(): number {
+        const forcedTerminalBranch = this.forcedTerminalBranch;
+
+        if (forcedTerminalBranch !== null) {
+            const i = forcedTerminalBranch.source.index;
+            this.graph.longestReach =
+                ((i - forcedTerminalBranch.destination.index) * 100) /
+                this.beats.length;
+            return i;
+        }
+
+        this.graph.longestReach = 0;
+        return this.graph.beats.length;
+    }
+
+    /**
+     * Keep the forced terminal branch from becoming a tiny loop.
+     */
+    private keepOnlyTerminalBranches(): void {
+        const beat = this.graph.beats[this.graph.lastBranchPoint];
+
+        if (beat === undefined) {
+            return;
+        }
+
+        if (this.forcedTerminalBranch?.source.index === beat.index) {
+            beat.neighbours = [this.forcedTerminalBranch];
+            return;
+        }
+
+        const terminalBranches = beat.neighbours
+            .filter((branch) => this.isTerminalLoopBranch(branch))
+            .sort((a, b) => this.compareTerminalBranches(a, b));
+
+        if (terminalBranches.length > 0) {
+            beat.neighbours = [terminalBranches[0]];
+            return;
+        }
+
+        const bestTerminalBranch = this.bestTerminalBranch(beat);
+
+        if (bestTerminalBranch !== null) {
+            beat.neighbours = [bestTerminalBranch];
+        }
+    }
+
+    private bestTerminalBranch(beat: Beat): Edge | null {
+        return (
+            beat.neighbours
+                .filter((branch) => this.isTerminalLoopBranch(branch))
+                .sort((a, b) => this.compareTerminalBranches(a, b))[0] ?? null
+        );
+    }
+
+    private isTerminalLoopBranch(branch: Edge): boolean {
+        return (
+            branch.source.index >= this.getMinTerminalBranchPoint() &&
+            branch.destination.index <= this.getMaxTerminalBranchDestination()
+        );
+    }
+
+    private compareTerminalBranches(a: Edge, b: Edge): number {
+        const qualityDelta = a.distance - b.distance;
+
+        if (qualityDelta !== 0) {
+            return qualityDelta;
+        }
+
+        const destinationDelta = a.destination.index - b.destination.index;
+
+        if (destinationDelta !== 0) {
+            return destinationDelta;
+        }
+
+        const sourceDelta = b.source.index - a.source.index;
+
+        if (sourceDelta !== 0) {
+            return sourceDelta;
+        }
+
+        return 0;
+    }
+
+    private getMinTerminalBranchPoint(): number {
+        return Math.floor(
+            this.graph.beats.length *
+                this.clamp(this.settings.terminalBranchSourceStart, 0.6, 0.95),
+        );
+    }
+
+    private getMaxTerminalBranchDestination(): number {
+        return Math.floor(
+            this.graph.beats.length *
+                this.clamp(this.settings.terminalBranchTargetEnd, 0.05, 0.5),
+        );
+    }
+
+    private getTerminalBranchCandidates(): {
+        percentDistance: number;
+        beatIndex: number;
+        otherBeatIndex: number;
+        currentBeat: Beat;
+        edge: Edge;
+    }[] {
+        const minSource = Math.max(
+            this.getMinTerminalBranchPoint(),
+            this.getLatestNaturalBranchPoint(),
+        );
+        const maxTarget = Math.min(
+            this.getMaxTerminalBranchDestination(),
+            this.getEarliestNaturalBranchPoint(),
+        );
+
+        const branches = this.collectTerminalBranchCandidates(
+            minSource,
+            maxTarget,
+        );
+
+        if (branches.length > 0) {
+            return branches;
+        }
+
+        return this.collectTerminalBranchCandidates(
+            minSource,
+            maxTarget,
+            true,
+        );
+    }
+
+    private getLatestNaturalBranchPoint(): number {
+        let latest = 0;
+
+        for (const beat of this.graph.beats) {
+            if (beat.neighbours.length > 0) {
+                latest = beat.index;
+            }
+        }
+
+        return latest;
+    }
+
+    private getEarliestNaturalBranchPoint(): number {
+        for (const beat of this.graph.beats) {
+            if (beat.neighbours.length > 0) {
+                return beat.index;
+            }
+        }
+
+        return this.getMaxTerminalBranchDestination();
+    }
+
+    private collectTerminalBranchCandidates(
+        minSource: number,
+        maxTarget: number,
+        allowAnyBackwardBranch = false,
+    ): {
+        percentDistance: number;
+        beatIndex: number;
+        otherBeatIndex: number;
+        currentBeat: Beat;
+        edge: Edge;
+    }[] {
         const branches: {
             percentDistance: number;
             beatIndex: number;
@@ -393,133 +552,84 @@ export class GraphGenerator {
         }[] = [];
 
         for (const [beatIndex, beat] of this.graph.beats.entries()) {
+            if (beatIndex < minSource) {
+                continue;
+            }
+
             for (const neighbor of this.allNeighbours[beatIndex]) {
                 const destinationIndex = neighbor.destination.index;
-                const edgeDistance = neighbor.distance;
 
-                const delta = beatIndex - destinationIndex;
-
-                if (delta > 0 && edgeDistance < maxBranchDistance) {
-                    const percent = (delta * 100) / this.graph.beats.length;
-                    branches.push({
-                        percentDistance: percent,
-                        beatIndex,
-                        otherBeatIndex: destinationIndex,
-                        currentBeat: beat,
-                        edge: neighbor,
-                    });
+                if (destinationIndex >= beatIndex) {
+                    continue;
                 }
+
+                if (destinationIndex > maxTarget) {
+                    continue;
+                }
+
+                const percent =
+                    ((beatIndex - destinationIndex) * 100) /
+                    this.graph.beats.length;
+                branches.push({
+                    percentDistance: percent,
+                    beatIndex,
+                    otherBeatIndex: destinationIndex,
+                    currentBeat: beat,
+                    edge: neighbor,
+                });
             }
         }
 
-        if (branches.length === 0) {
-            return;
-        }
-
-        branches.sort((a, b) => {
-            return a.percentDistance - b.percentDistance;
-        });
-
-        branches.reverse();
-
-        const bestBranch = branches[0];
-
-        const bestBeat: Beat = bestBranch.currentBeat;
-        const bestNeighbor: Edge = bestBranch.edge;
-        const bestDistance = bestNeighbor.distance;
-
-        if (bestDistance > threshold) {
-            bestBeat.neighbours.push(bestNeighbor);
-        }
+        return branches;
     }
 
-    /**
-     * Calculate a reachability array for the beats (how many beats are left after each beat).
-     * @returns The reachability array.
-     */
-    private calculateReachability(): number[] {
-        const maxIter = 1000;
-        const reaches: number[] = this.graph.beats.map(() => 0);
+    private compareTerminalBranchCandidates(
+        a: {
+            beatIndex: number;
+            otherBeatIndex: number;
+            percentDistance: number;
+            edge: Edge;
+        },
+        b: {
+            beatIndex: number;
+            otherBeatIndex: number;
+            percentDistance: number;
+            edge: Edge;
+        },
+    ): number {
+        const qualityDelta = a.edge.distance - b.edge.distance;
 
-        this.graph.beats.forEach((beat, beatIndex) => {
-            reaches[beatIndex] = this.graph.beats.length - beatIndex;
-        });
-
-        for (let iter = 0; iter < maxIter; iter++) {
-            let changeCount = 0;
-
-            for (const [beatIndex, beat] of this.graph.beats.entries()) {
-                let changed = false;
-
-                for (const neighbor of beat.neighbours) {
-                    const neighborReach = reaches[neighbor.destination.index];
-                    if (neighborReach > reaches[beatIndex]) {
-                        reaches[beatIndex] = neighborReach;
-                        changed = true;
-                    }
-                }
-
-                if (beatIndex < this.graph.beats.length - 1) {
-                    const nextReach = reaches[beatIndex + 1];
-                    if (nextReach > reaches[beatIndex]) {
-                        reaches[beatIndex] = nextReach;
-                        changed = true;
-                    }
-                }
-
-                if (changed) {
-                    changeCount++;
-                    for (let i = 0; i < beatIndex; i++) {
-                        if (reaches[i] < reaches[beatIndex]) {
-                            reaches[i] = reaches[beatIndex];
-                        }
-                    }
-                }
-            }
-
-            if (changeCount === 0) {
-                break;
-            }
+        if (qualityDelta !== 0) {
+            return qualityDelta;
         }
 
-        return reaches;
+        const sourceDelta = b.beatIndex - a.beatIndex;
+
+        if (sourceDelta !== 0) {
+            return sourceDelta;
+        }
+
+        const destinationDelta = a.otherBeatIndex - b.otherBeatIndex;
+
+        if (destinationDelta !== 0) {
+            return destinationDelta;
+        }
+
+        const distanceDelta = b.percentDistance - a.percentDistance;
+
+        if (distanceDelta !== 0) {
+            return distanceDelta;
+        }
+
+        return 0;
     }
 
-    /**
-     * Find the best last beat for the song.
-     * @returns The index of the best last beat.
-     */
-    private findBestLastBeat(): number {
-        const reaches = this.calculateReachability();
-        const reachThreshold = 50;
-
-        let longest = 0;
-        let longestReach = 0;
-
-        for (let i = this.graph.beats.length - 1; i >= 0; i--) {
-            const beat = this.graph.beats[i];
-
-            const distanceToEnd = this.graph.beats.length - i;
-
-            // if q is the last quanta, then we can never go past it
-            // which limits our reach
-
-            // reach as percent
-            const reach =
-                ((reaches[i] - distanceToEnd) * 100) / this.beats.length;
-
-            if (reach > longestReach && beat.neighbours.length > 0) {
-                longestReach = reach;
-                longest = i;
-                if (reach >= reachThreshold) {
-                    break;
-                }
-            }
+    private clamp(value: number, min: number, max: number): number {
+        if (!Number.isFinite(value)) {
+            return min;
         }
 
-        this.graph.longestReach = longestReach;
-
-        return longest;
+        return Math.max(min, Math.min(max, value));
     }
 
     /**
